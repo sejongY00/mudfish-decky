@@ -35,6 +35,16 @@ class SystemTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as var:
             self.assertEqual(api_base(var), "http://127.0.0.1:8282")
 
+    def test_lan_ip_from_route_get(self):
+        from mudfish_decky.system import lan_ip
+        out = "1.1.1.1 via 192.168.1.1 dev wlan0 src 192.168.1.50 uid 0 \n    cache \n"
+        self.assertEqual(lan_ip(run=lambda cmd, **kw: types.SimpleNamespace(stdout=out, returncode=0)),
+                         "192.168.1.50")
+
+    def test_lan_ip_none_without_route(self):
+        from mudfish_decky.system import lan_ip
+        self.assertIsNone(lan_ip(run=lambda cmd, **kw: types.SimpleNamespace(stdout="", returncode=2)))
+
     def test_sleep_offset_is_boottime_minus_monotonic(self):
         from mudfish_decky.system import sleep_offset
         clocks = {"boot": 500.0, "mono": 420.0}

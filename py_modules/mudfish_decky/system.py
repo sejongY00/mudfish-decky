@@ -71,6 +71,16 @@ def route_text(run=subprocess.run) -> str:
     return run(["ip", "-4", "route"], capture_output=True, text=True, timeout=5).stdout
 
 
+def lan_ip(run=subprocess.run) -> Optional[str]:
+    """The Deck's source address for outbound traffic (its Wi-Fi/LAN IP when the VPN is off)."""
+    try:
+        out = run(["ip", "-4", "route", "get", "1.1.1.1"], capture_output=True, text=True, timeout=5).stdout
+    except Exception:
+        return None
+    parts = out.split()
+    return parts[parts.index("src") + 1] if "src" in parts[:-1] else None
+
+
 def public_ip() -> Optional[dict]:
     try:
         with urllib.request.urlopen("https://ipinfo.io/json", timeout=8, context=ssl_context()) as resp:

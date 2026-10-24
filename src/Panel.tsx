@@ -4,8 +4,10 @@ import {
   Field,
   PanelSection,
   PanelSectionRow,
+  showModal,
   ToggleField,
 } from "@decky/ui";
+import { LoginModal } from "./LoginModal";
 import { useEffect, useRef, useState } from "react";
 import {
   connect,
@@ -156,6 +158,13 @@ export function Panel() {
       {state.message && (
         <PanelSectionRow>
           <Field focusable={false} description={state.message} />
+        </PanelSectionRow>
+      )}
+      {state.need_login && (
+        <PanelSectionRow>
+          <ButtonItem layout="below" onClick={() => showModal(<LoginModal />)}>
+            휴대폰으로 로그인 (QR)
+          </ButtonItem>
         </PanelSectionRow>
       )}
       <PanelSectionRow>

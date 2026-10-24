@@ -3,8 +3,8 @@ import tempfile
 import unittest
 
 from mudfish_decky.client import AuthError, SigninError
-from mudfish_decky.controller import (MSG_MISSING, MSG_NO_RESPONSE, MSG_RELOGIN, MSG_RTT, MSG_SLEEP, MSG_STILL_UP,
-                                      MSG_TIMEOUT, Controller)
+from mudfish_decky.controller import (MSG_LOGGED_IN, MSG_MISSING, MSG_NO_LAN, MSG_NO_RESPONSE, MSG_RELOGIN, MSG_RTT,
+                                      MSG_SLEEP, MSG_STILL_UP, MSG_TIMEOUT, Controller)
 from mudfish_decky.store import Store
 from tests.test_nodes import STATIC
 
@@ -20,6 +20,10 @@ class FakeSystem:
         self.deleted = []
         self.daemon_calls = 0
         self.ip = {"ip": "13.73.234.162", "country": "JP"}
+        self.lan = "192.168.1.50"
+
+    def lan_ip(self):
+        return self.lan
 
     def find_mudfish(self):
         return ("/opt/mudfish/6.6.0/bin/mudrun-headless", "/opt/mudfish/6.6.0/var") if self.installed else None
@@ -39,6 +43,25 @@ class FakeSystem:
 
     def public_ip(self):
         return self.ip
+
+
+class FakeRelay:
+    token = "tok"
+    expires_at = 1300.0
+
+    def __init__(self):
+        self.active = False
+        self.started = False
+        self.start_calls = 0
+
+    def start(self, host="0.0.0.0"):
+        self.started = True
+        self.active = True
+        self.start_calls += 1
+        return 40123
+
+    def stop(self):
+        self.active = False
 
 
 class FakeClient:
@@ -332,6 +355,86 @@ class ControllerTest(unittest.TestCase):
         st = self.make().connect()
         self.assertEqual(st["message"], MSG_RTT)
         self.assertEqual(self.client.start_calls, 0)
+
+    # ---- phone (QR) login --------------------------------------------------------------------
+
+    def make_with_relay(self):
+        self.relay = FakeRelay()
+        return Controller(self.client, self.system, Store(self.path), clock=lambda: self.now,
+                          sleep=lambda s: None, relay_factory=lambda: self.relay)
+
+    def test_connect_signin_failure_flags_need_login(self):
+        self.client.signin_error = SigninError("401")
+        self.assertTrue(self.make().connect()["need_login"])
+
+    def test_prepare_signin_failure_flags_need_login(self):
+        self.client.signin_error = SigninError("401")
+        c = self.make()
+        c.prepare()
+        st = c.state()
+        self.assertTrue(st["need_login"])
+        self.assertEqual(st["message"], MSG_RELOGIN)
+
+    def test_prepare_network_failure_does_not_flag_need_login(self):
+        self.client.signin_error = OSError("name resolution")
+        c = self.make()
+        c.prepare()
+        self.assertFalse(c.state()["need_login"])
+
+    def test_need_login_false_by_default(self):
+        self.assertFalse(self.make().state()["need_login"])
+
+    def test_start_login_exposes_qr_url(self):
+        c = self.make_with_relay()
+        st = c.start_login()
+        self.assertEqual(st["login"], {"url": "http://192.168.1.50:40123/_mfd/tok", "expires_at": 1300.0})
+        self.assertTrue(self.relay.started)
+        self.assertEqual(self.client.start_calls, 0)
+
+    def test_start_login_reuses_active_relay(self):
+        c = self.make_with_relay()
+        c.start_login()
+        c.start_login()
+        self.assertEqual(self.relay.start_calls, 1)
+
+    def test_start_login_without_lan_ip_shows_message(self):
+        self.system.lan = None
+        st = self.make_with_relay().start_login()
+        self.assertIsNone(st["login"])
+        self.assertEqual(st["message"], MSG_NO_LAN)
+        self.assertFalse(self.relay.started)
+
+    def test_state_closes_relay_after_signin(self):
+        self.client.signin_error = SigninError("401")
+        self.client.st["isSignedIn"] = False
+        c = self.make_with_relay()
+        c.connect()
+        c.start_login()
+        self.client.st["isSignedIn"] = True  # user logged in from the phone
+        st = c.state()
+        self.assertFalse(self.relay.active)
+        self.assertIsNone(st["login"])
+        self.assertFalse(st["need_login"])
+        self.assertEqual(st["phase"], "off")
+        self.assertEqual(st["message"], MSG_LOGGED_IN)
+
+    def test_stop_login_closes_relay(self):
+        c = self.make_with_relay()
+        c.start_login()
+        self.assertIsNone(c.stop_login()["login"])
+        self.assertFalse(self.relay.active)
+
+    def test_expired_relay_drops_from_state(self):
+        c = self.make_with_relay()
+        c.start_login()
+        self.relay.active = False
+        self.assertIsNone(c.state()["login"])
+
+    def test_shutdown_closes_relay(self):
+        c = self.make_with_relay()
+        c.start_login()
+        c.shutdown()
+        self.assertFalse(self.relay.active)
 
     # ---- sleep / shutdown --------------------------------------------------------------------
 

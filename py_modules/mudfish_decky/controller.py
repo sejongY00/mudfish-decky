@@ -21,6 +21,8 @@ MSG_MISSING = "데스크탑 모드에서 미꾸라지를 설치하세요 (docs.m
 MSG_STILL_UP = "터널이 아직 남아 있어요. 끄기를 다시 눌러 주세요"
 MSG_NO_RESPONSE = "미꾸라지가 응답하지 않아요. 터널이 남아 있을 수 있으니 끄기를 눌러 주세요"
 MSG_SLEEP = "절전에서 깨어나 VPN을 껐어요. 필요하면 다시 켜 주세요"
+MSG_LOGGED_IN = "로그인됐어요. 이제 켤 수 있어요"
+MSG_NO_LAN = "와이파이 주소를 찾지 못해 휴대폰 로그인을 열 수 없어요"
 
 CONNECT_TIMEOUT = 30
 DISCONNECT_TIMEOUT = 10
@@ -32,15 +34,20 @@ log = logging.getLogger("mudfish_decky")
 
 
 class Controller:
-    def __init__(self, client, system, store, clock=time.time, sleep=time.sleep):
+    def __init__(self, client, system, store, clock=time.time, sleep=time.sleep, relay_factory=None):
         self.client = client
         self.system = system
         self.store = store
         self.clock = clock
         self.sleep = sleep
+        self.relay_factory = relay_factory
         self._lock = threading.Lock()
         self._error: Optional[str] = None
         self._notice: Optional[str] = None
+        self._need_login = False
+        self._failed_jwt: Optional[str] = None
+        self._relay = None
+        self._relay_url: Optional[str] = None
         self._static: Optional[list] = None
         self._ip_cache = (0.0, None)
         self._sleep_offset: Optional[float] = None
@@ -60,6 +67,10 @@ class Controller:
             try:
                 st = self._signed_in(installed)
                 self._static_nodes(st)
+            except SigninError as e:
+                log.warning("prepare: saved login rejected: %s", e)
+                self._error = MSG_RELOGIN
+                self._mark_need_login()
             except Exception as e:
                 log.warning("prepare: %s", e)
 
@@ -77,6 +88,7 @@ class Controller:
             started = False
             try:
                 st = self._signed_in(installed)
+                self._need_login = False
                 if self._is_on(st):
                     return self._state()
                 self._refresh_rtts()
@@ -116,6 +128,7 @@ class Controller:
                 if self._is_on(st):
                     self._reapply(st)
             except SigninError:
+                self._mark_need_login()
                 return self._fail(MSG_RELOGIN)
             except Exception as e:
                 log.exception("node change failed")
@@ -137,9 +150,31 @@ class Controller:
                     self._error = MSG_STILL_UP
             return True
 
-    def shutdown(self) -> None:
-        """Plugin unload (Deck shutdown/restart, Decky restart): never leave a tunnel behind."""
+    def start_login(self) -> dict:
+        """Open the short-lived LAN relay to the launcher UI; the panel shows its URL as a QR code."""
         with self._lock:
+            if self._relay is not None and self._relay.active:
+                return self._state()
+            ip = self.system.lan_ip()
+            if not ip or self.relay_factory is None:
+                self._notice = MSG_NO_LAN
+                return self._state()
+            relay = self.relay_factory()
+            port = relay.start()
+            self._relay = relay
+            self._relay_url = f"http://{ip}:{port}/_mfd/{relay.token}"
+            log.info("login relay open on %s:%d for %ss", ip, port, int(relay.expires_at - self.clock()))
+            return self._state()
+
+    def stop_login(self) -> dict:
+        with self._lock:
+            self._close_relay()
+            return self._state()
+
+    def shutdown(self) -> None:
+        """Plugin unload (Deck shutdown/restart, Decky restart): never leave a tunnel or relay behind."""
+        with self._lock:
+            self._close_relay()
             if self._tunnel_present():
                 log.info("unload; turning VPN off")
                 self._teardown()
@@ -150,10 +185,41 @@ class Controller:
         self._error = message
         return self._state()
 
+    def _mark_need_login(self) -> None:
+        """Remember which session failed so state() can tell when a new login (e.g. from the phone) lands."""
+        self._need_login = True
+        try:
+            st = self.client.status()
+            self._failed_jwt = st.get("jwt") if st.get("isSignedIn") else None
+        except Exception:
+            self._failed_jwt = None
+
     def _abort(self, started: bool, message: str) -> dict:
+        if message == MSG_RELOGIN:
+            self._mark_need_login()
         if started and not self._teardown():
             message = MSG_STILL_UP
         return self._fail(message)
+
+    def _track_login(self, st: Optional[dict]) -> None:
+        """Drop an expired relay; once a new session appears after a failed login, close the relay."""
+        if self._relay is not None and not self._relay.active:
+            self._close_relay()
+        if not (self._need_login and st and st.get("isSignedIn") and st.get("jwt")):
+            return
+        if st["jwt"] == self._failed_jwt:
+            return
+        self._need_login = False
+        self._failed_jwt = None
+        if self._error == MSG_RELOGIN:
+            self._error = None
+        self._close_relay()
+        self._notice = MSG_LOGGED_IN
+
+    def _close_relay(self) -> None:
+        if self._relay is not None:
+            self._relay.stop()
+        self._relay = self._relay_url = None
 
     def _wait(self, cond, seconds) -> bool:
         for _ in range(seconds):
@@ -291,7 +357,8 @@ class Controller:
     def _state(self) -> dict:
         data = self.store.load()
         out = {"phase": "off", "message": None, "node_mode": data.get("node_mode") or "auto", "node": None,
-               "ip": None, "country": None, "connected_since": None, "tunnel": False}
+               "ip": None, "country": None, "connected_since": None, "tunnel": False,
+               "need_login": False, "login": None}
         if not self.system.find_mudfish():
             out.update(phase="missing", message=MSG_MISSING)
             return out
@@ -299,6 +366,10 @@ class Controller:
             st = self.client.status()
         except Exception:
             st = None
+        self._track_login(st)
+        out["need_login"] = self._need_login
+        if self._relay is not None:
+            out["login"] = {"url": self._relay_url, "expires_at": self._relay.expires_at}
         tap = self.system.tap_up()
         on = bool(st) and self._is_on(st)
         out["tunnel"] = tap or bool(st and st.get("core_running"))

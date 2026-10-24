@@ -2,6 +2,7 @@ import asyncio
 import logging
 import os
 import sys
+import urllib.parse
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "py_modules"))
 
@@ -10,9 +11,11 @@ import decky  # noqa: E402
 from mudfish_decky import system  # noqa: E402
 from mudfish_decky.client import MudfishClient  # noqa: E402
 from mudfish_decky.controller import Controller  # noqa: E402
+from mudfish_decky.relay import LoginRelay  # noqa: E402
 from mudfish_decky.store import Store  # noqa: E402
 
 RESUME_POLL_SECONDS = 2
+LOGIN_RELAY_SECONDS = 300
 
 
 class Plugin:
@@ -23,8 +26,18 @@ class Plugin:
             installed = system.find_mudfish()
             base = system.api_base(installed[1]) if installed else system.DEFAULT_API
             store = Store(os.path.join(decky.DECKY_PLUGIN_SETTINGS_DIR, "settings.json"))
-            self.controller = Controller(MudfishClient(base), system, store)
+            target = urllib.parse.urlsplit(base)
+            self.controller = Controller(
+                MudfishClient(base), system, store,
+                relay_factory=lambda: LoginRelay(target=(target.hostname, target.port or 80), ttl=LOGIN_RELAY_SECONDS),
+            )
         return self.controller
+
+    async def start_login(self) -> dict:
+        return await asyncio.to_thread(self._get_controller().start_login)
+
+    async def stop_login(self) -> dict:
+        return await asyncio.to_thread(self._get_controller().stop_login)
 
     async def get_state(self) -> dict:
         return await asyncio.to_thread(self._get_controller().state)
