@@ -3,7 +3,7 @@
 # Needs passwordless sudo for the deck user (development only).
 set -euo pipefail
 cd "$(dirname "$0")/.."
-DECK="${DECK:-deck@192.168.1.50}"
+DECK="${DECK:?set DECK to the Steam Deck SSH target, e.g. DECK=deck@steamdeck.local}"
 pnpm build
 tar --exclude='__pycache__' -cf - dist main.py plugin.json package.json py_modules | ssh "$DECK" '
   D=/home/deck/homebrew/plugins/mudfish-decky

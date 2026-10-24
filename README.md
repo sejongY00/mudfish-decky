@@ -35,6 +35,7 @@
 
 ## 개발
 
-- 파이썬 테스트는 스팀덱에서 실행합니다: `bash scripts/test.sh` (SSH `deck@192.168.1.50`)
+- 스크립트는 SSH 대상을 `DECK` 환경변수로 받습니다(예: `export DECK=deck@steamdeck.local`). 덱에 SSH 키 인증이 설정되어 있어야 합니다.
+- 파이썬 테스트는 스팀덱에서 실행합니다: `bash scripts/test.sh`
 - 빌드와 배포: `bash scripts/deploy.sh`. 덱의 `deck` 계정에 **sudo 비밀번호 없음 설정이 있어야** 동작합니다. 개발용 설정을 지운 뒤에는 쓸 수 없고, 다시 배포하려면 그 설정을 잠시 되살려야 합니다.
 - 설계: `docs/superpowers/specs/2026-10-24-mudfish-decky-design.md`

@@ -41,7 +41,7 @@
 
 ## 3. 환경 (2026-10-24 SSH로 확인)
 
-- 스팀덱: SteamOS (holo), 커널 7.2.7, Python 3.14.6. SSH 주소 `deck@192.168.1.50`이고 키 인증이 등록되어 있다.
+- 스팀덱: SteamOS (holo), 커널 7.2.7, Python 3.14.6. SSH(`deck@<스팀덱 IP>`)는 키 인증으로 접속한다.
 - 데키로더 **v3.3.0**과 플러그인 13개가 설치되어 있다. 참고할 만한 기존 플러그인으로 `tailscale-control`(VPN 스위치)이 있다.
 - 지포스나우: Flatpak `com.nvidia.geforcenow` (user).
 - 미꾸라지 **6.6.0**이 `/opt/mudfish/6.6.0/`에 설치되어 있다. `/opt`는 `/home` 쪽 파티션(`/.steamos/offload/opt`)이라 SteamOS 업데이트 후에도 남는다.
