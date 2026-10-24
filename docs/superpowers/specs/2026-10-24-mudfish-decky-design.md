@@ -151,6 +151,21 @@
 5. 데스크탑 모드와 게임모드를 오갈 때 systemd로 띄운 데몬이 유지되는지.
 6. 스팀덱 기본 Tailscale(`tailscale0`)과 Full VPN이 충돌하지 않는지.
 
+### 실측 결과 (2026-10-24, 구현 Task 1)
+
+1. **Full VPN이 동작한다.** `/prog`로 `mudfishFullvpnSid=165`(Osaka - Azure 01)를 저장하고 start하자 약 8초 뒤 `client_ready`가 됐다.
+   - 경로: `0.0.0.0/1`과 `128.0.0.0/1`을 `tap0`로 보내는 분할 방식이다. 기존 `default via 192.168.1.1`은 그대로 남는다.
+   - 공인 IP: `13.73.234.162`, `JP`(Microsoft).
+   - `login.nvidia.com`과 `play.geforcenow.com`이 모두 `dev tap0`으로 나간다.
+   - DNS는 그대로 `1.1.1.1`이지만, 1.1.1.1로 가는 질의도 터널을 타서 일본에서 질의한 것으로 보인다.
+2. **꺼진 상태에서 sid를 저장하면** `/prog` 응답이 `need_restart: True`다. 로컬 `status.mudfish_fullvpn_sid`는 다음 start 때 반영된다.
+3. **연결된 상태에서 sid를 165 → 504로 바꾸면** `need_restart: False`다. 이어서 `/do/fullvpn/refresh`를 부르면 재연결 없이 새 노드(Amazon 오사카, `13.208.184.0`)로 바뀐다. 이때 응답 본문은 비어 있다.
+   - 단, **로컬 `status.mudfish_fullvpn_sid`는 165로 남는다.** 그래서 현재 노드는 status가 아니라 플러그인 저장값이나 클라우드 progConf로 판단해야 한다.
+4. **해제하면** `tap0`가 없어지고, 분할 경로가 사라지고, 국가가 `KR`로 돌아온다. DNS 설정은 변화 없다. 노드 /32 경로는 이번 연결에서 5개가 새로 남았다(이전 시험분 포함 총 353줄).
+5. **`/do/rtt/staticnodes`는 측정 라운드가 도는 동안 `{"status": 300}`만 준다.** `rtts`는 라운드가 끝난 순간에만 `status: 200`으로 잠깐 나오고, 라운드 간격은 1분 이상이다. 그래서 플러그인은 마지막으로 성공한 측정값을 저장해 둬야 한다.
+6. **Tailscale은 로그아웃 상태**(`/opt/tailscale/tailscale status` → Logged out)라 충돌 우려가 없다.
+7. **게임모드 전환 시 데몬 유지**는 구현 Task 6에서 게임모드로 확인할 때 같이 본다.
+
 ## 10. 끝나면 할 일
 
 - 스팀덱의 `/etc/sudoers.d/zz-dev-nopasswd`를 지운다(사용자가 직접 실행: `sudo rm /etc/sudoers.d/zz-dev-nopasswd`).
