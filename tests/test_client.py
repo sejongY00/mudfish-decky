@@ -4,7 +4,7 @@ import unittest
 from mudfish_decky.client import AuthError, MudfishClient, MudfishError, SigninError
 
 BASE = "http://127.0.0.1:8282"
-SIGNED_OUT = {"status": 200, "isSignedIn": False, "username": "u", "token_v3": "123",
+SIGNED_OUT = {"status": 200, "isSignedIn": False, "autologin": True, "username": "u", "token_v3": "123",
               "item_conf_mode": "simple", "version": "6.6.0", "api_server": "api.mudfish.net", "jwt": ""}
 SIGNIN_OK = {"status": 200, "token_v3": "456", "jwt": "JWT", "expert_mode": 0, "lang": "ko_KR", "alias_enable": 0}
 
@@ -99,6 +99,13 @@ class ClientTest(unittest.TestCase):
         t = FakeTransport({("GET", BASE + "/do/mudrun/status"): [dict(SIGNED_OUT, autologin=True, token_v3="")]})
         with self.assertRaises(SigninError):
             MudfishClient(BASE, t).ensure_signed_in()
+
+    def test_logged_out_launcher_is_signin_error_without_calling_cloud(self):
+        # After /logout.html the launcher reports autologin=False and token_v3="0".
+        t = FakeTransport({("GET", BASE + "/do/mudrun/status"): [dict(SIGNED_OUT, autologin=False, token_v3="0")]})
+        with self.assertRaises(SigninError):
+            MudfishClient(BASE, t).ensure_signed_in()
+        self.assertEqual(t.calls_to("POST", "https://api.mudfish.net/signin_ng_v3"), [])
 
     def test_graphql_without_user_is_auth_error(self):
         t = FakeTransport({("POST", "https://api.mudfish.net/graphql"): [{"errors": ["unauthorized"]}]})

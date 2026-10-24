@@ -93,7 +93,8 @@ class MudfishClient:
         st = self.status()
         if st.get("isSignedIn") and not force:
             return st
-        if not st.get("token_v3") or not st.get("username"):
+        # A logged-out launcher reports autologin=False and token_v3="0".
+        if not st.get("autologin") or str(st.get("token_v3") or "0") == "0" or not st.get("username"):
             raise SigninError("no saved login")
         body, ctype = _multipart({
             "autologin": "ON", "username": st["username"], "password": st["token_v3"],
