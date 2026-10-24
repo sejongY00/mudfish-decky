@@ -1,0 +1,11 @@
+{
+  "name": "Mudfish VPN",
+  "author": "ysj7705",
+  "flags": ["root"],
+  "api_version": 1,
+  "publish": {
+    "tags": ["vpn", "mudfish", "root"],
+    "description": "Toggle Mudfish Cloud VPN Full VPN mode from Gaming Mode and pick a Japan node.",
+    "image": ""
+  }
+}
