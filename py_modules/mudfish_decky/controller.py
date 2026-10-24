@@ -17,7 +17,13 @@ from .routes import host_routes, leftover_routes
 MSG_RELOGIN = "데스크탑 모드에서 미꾸라지(127.0.0.1:8282)에 '로그인 기억하기'로 다시 로그인하세요"
 MSG_RTT = "노드 핑을 측정하는 중이에요. 잠시 후 다시 켜 주세요"
 MSG_TIMEOUT = "30초 안에 연결되지 않아 연결을 취소했어요"
-MSG_MISSING = "데스크탑 모드에서 미꾸라지를 설치하세요 (docs.mudfish.net Steam Deck 가이드)"
+MSG_MISSING = "미꾸라지가 설치되어 있지 않아요. 아래 버튼으로 설치하세요"
+MSG_INSTALLED = "미꾸라지 {}를 설치했어요"
+MSG_UPDATED = "미꾸라지 {}로 업데이트했어요"
+MSG_UPDATE_NEED_OFF = "업데이트하려면 먼저 VPN을 꺼 주세요"
+MSG_UP_TO_DATE = "이미 최신 버전이에요"
+MSG_NO_RELEASE = "미꾸라지 최신 버전을 찾지 못했어요"
+MSG_REMOVED = "미꾸라지를 제거했어요"
 MSG_STILL_UP = "터널이 아직 남아 있어요. 끄기를 다시 눌러 주세요"
 MSG_NO_RESPONSE = "미꾸라지가 응답하지 않아요. 터널이 남아 있을 수 있으니 끄기를 눌러 주세요"
 MSG_SLEEP = "절전에서 깨어나 VPN을 껐어요. 필요하면 다시 켜 주세요"
@@ -29,18 +35,27 @@ DISCONNECT_TIMEOUT = 10
 PUBLIC_IP_TTL = 30
 RTT_TTL = 600          # cached pings older than this are ignored for the auto pick
 RESUME_JUMP = 3.0      # seconds of suspended time that count as a sleep/resume
+LATEST_CHECK_INTERVAL = 86400
 
 log = logging.getLogger("mudfish_decky")
 
 
+def _version_key(version: str):
+    try:
+        return tuple(int(p) for p in version.split("."))
+    except (AttributeError, ValueError):
+        return ()
+
+
 class Controller:
-    def __init__(self, client, system, store, clock=time.time, sleep=time.sleep, relay_factory=None):
+    def __init__(self, client, system, store, clock=time.time, sleep=time.sleep, relay_factory=None, installer=None):
         self.client = client
         self.system = system
         self.store = store
         self.clock = clock
         self.sleep = sleep
         self.relay_factory = relay_factory
+        self.installer = installer
         self._lock = threading.Lock()
         self._error: Optional[str] = None
         self._notice: Optional[str] = None
@@ -61,18 +76,118 @@ class Controller:
     def prepare(self) -> None:
         """Plugin load: bring up the idle launcher and sign in so the node list is ready. Never connects."""
         with self._lock:
+            self._prepare()
+
+    def _prepare(self) -> None:
+        installed = self.system.find_mudfish()
+        if not installed:
+            return
+        try:
+            st = self._signed_in(installed)
+            self._static_nodes(st)
+        except SigninError as e:
+            log.warning("prepare: saved login rejected: %s", e)
+            self._error = MSG_RELOGIN
+            self._mark_need_login()
+        except Exception as e:
+            log.warning("prepare: %s", e)
+
+    # ---- Mudfish install / update / uninstall --------------------------------------------------
+
+    def refresh_latest(self, force: bool = False) -> None:
+        """Look up the newest Mudfish release at most once a day (network; call off the UI path)."""
+        with self._lock:
+            self._refresh_latest(force)
+
+    def _refresh_latest(self, force: bool = False) -> Optional[str]:
+        data = self.store.load()
+        checked = data.get("latest_checked_at")
+        if not force and checked is not None and self.clock() - checked < LATEST_CHECK_INTERVAL:
+            return data.get("latest_version")
+        try:
+            latest = self.installer.latest_version()
+        except Exception as e:
+            log.warning("latest version check failed: %s", e)
+            return data.get("latest_version")
+        self.store.update(latest_version=latest, latest_checked_at=self.clock())
+        return latest
+
+    def install(self) -> dict:
+        with self._lock:
+            self._error = self._notice = None
+            if self.system.find_mudfish():
+                return self._state()
+            try:
+                version = self._refresh_latest(force=True)
+                if not version:
+                    return self._fail(MSG_NO_RELEASE)
+                version = self.installer.install_package(self.installer.download(version),
+                                                         self.installer.MUDFISH_ROOT)
+                log.info("installed mudfish %s", version)
+                self._start_daemon_and_prepare()
+                self._notice = MSG_INSTALLED.format(version)
+            except Exception as e:
+                log.exception("install failed")
+                return self._fail(f"설치 실패: {e}")
+            return self._state()
+
+    def update(self) -> dict:
+        with self._lock:
+            self._error = self._notice = None
             installed = self.system.find_mudfish()
             if not installed:
-                return
+                return self._state()
+            if self._tunnel_present():
+                self._notice = MSG_UPDATE_NEED_OFF
+                return self._state()
+            current = self.system.version_of(installed[0])
             try:
-                st = self._signed_in(installed)
-                self._static_nodes(st)
-            except SigninError as e:
-                log.warning("prepare: saved login rejected: %s", e)
-                self._error = MSG_RELOGIN
-                self._mark_need_login()
+                latest = self._refresh_latest(force=True)
+                if not latest or _version_key(latest) <= _version_key(current):
+                    self._notice = MSG_UP_TO_DATE
+                    return self._state()
+                version = self.installer.install_package(self.installer.download(latest),
+                                                         self.installer.MUDFISH_ROOT)
+                new = self.system.find_mudfish()
+                self.installer.carry_login(installed[1], new[1])
+                self.system.stop_daemon()
+                self._start_daemon_and_prepare()
+                self.installer.prune_versions(self.installer.MUDFISH_ROOT, keep=[version, current])
+                log.info("updated mudfish %s -> %s", current, version)
+                self._notice = MSG_UPDATED.format(version)
             except Exception as e:
-                log.warning("prepare: %s", e)
+                log.exception("update failed")
+                return self._fail(f"업데이트 실패: {e}")
+            return self._state()
+
+    def uninstall(self) -> dict:
+        """Turn everything off and remove Mudfish and this plugin's saved data. Never raises."""
+        with self._lock:
+            self._error = self._notice = None
+            self._close_relay()
+            try:
+                if self._tunnel_present():
+                    self._teardown()
+            except Exception as e:
+                log.warning("uninstall: teardown failed: %s", e)
+            for step in (self.system.stop_daemon, self.system.remove_nm_connection,
+                         lambda: self.installer.remove_all(self.installer.MUDFISH_ROOT)):
+                try:
+                    step()
+                except Exception as e:
+                    log.warning("uninstall step failed: %s", e)
+            self.store.save({})
+            self._static = None
+            self._need_login = False
+            self._failed_jwt = None
+            log.info("mudfish removed")
+            self._notice = MSG_REMOVED
+            return self._state()
+
+    def _start_daemon_and_prepare(self) -> None:
+        installed = self.system.find_mudfish()
+        self.system.ensure_daemon(installed[0], self.daemon_up)
+        self._prepare()
 
     def nodes(self) -> list:
         with self._lock:
@@ -358,9 +473,12 @@ class Controller:
         data = self.store.load()
         out = {"phase": "off", "message": None, "node_mode": data.get("node_mode") or "auto", "node": None,
                "ip": None, "country": None, "connected_since": None, "tunnel": False,
-               "need_login": False, "login": None}
-        if not self.system.find_mudfish():
-            out.update(phase="missing", message=MSG_MISSING)
+               "need_login": False, "login": None, "mudfish": None}
+        installed = self.system.find_mudfish()
+        out["mudfish"] = {"version": self.system.version_of(installed[0]) if installed else None,
+                          "latest": data.get("latest_version")}
+        if not installed:
+            out.update(phase="missing", message=self._error or self._notice or MSG_MISSING)
             return out
         try:
             st = self.client.status()

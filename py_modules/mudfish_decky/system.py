@@ -37,6 +37,20 @@ def find_mudfish(root: str = MUDFISH_ROOT) -> Optional[Tuple[str, str]]:
     return os.path.join(root, name, "bin", "mudrun-headless"), os.path.join(root, name, "var")
 
 
+def version_of(bin_path: str) -> str:
+    """'/opt/mudfish/6.6.0/bin/mudrun-headless' -> '6.6.0'."""
+    return os.path.basename(os.path.dirname(os.path.dirname(bin_path)))
+
+
+def stop_daemon(run=subprocess.run) -> None:
+    run(["systemctl", "stop", DAEMON_UNIT], capture_output=True, timeout=20)
+
+
+def remove_nm_connection(run=subprocess.run) -> None:
+    """Mudfish registers a NetworkManager connection for tap0; it is normally removed on stop."""
+    run(["nmcli", "connection", "delete", "mudfish-tap"], capture_output=True, timeout=10)
+
+
 def api_base(var_dir: str) -> str:
     try:
         with open(os.path.join(var_dir, ".ipport")) as f:

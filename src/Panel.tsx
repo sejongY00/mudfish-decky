@@ -1,5 +1,6 @@
 import {
   ButtonItem,
+  ConfirmModal,
   DropdownItem,
   Field,
   PanelSection,
@@ -13,7 +14,11 @@ import {
   connect,
   disconnect,
   getState,
+  installMudfish,
+  isNewer,
   listNodes,
+  uninstallMudfish,
+  updateMudfish,
   NodeInfo,
   Phase,
   setNode,
@@ -134,6 +139,42 @@ export function Panel() {
     ...nodes.map((n) => ({ data: String(n.sid), label: `${n.label} · ${rttText(n.rtt)}` })),
   ];
   const selected = state.node_mode === "auto" ? "auto" : String(state.node?.sid ?? "auto");
+  const version = state.mudfish?.version ?? null;
+  const latest = state.mudfish?.latest ?? null;
+  const missing = state.phase === "missing";
+
+  const confirmUninstall = () =>
+    showModal(
+      <ConfirmModal
+        strTitle="미꾸라지 제거"
+        strDescription="VPN을 끄고 미꾸라지(/opt/mudfish 전체, 로그인 정보 포함)와 이 플러그인의 설정을 지워요. 미꾸라지 계정은 그대로예요."
+        strOKButtonText="제거"
+        strCancelButtonText="취소"
+        onOK={() => run(uninstallMudfish)}
+      />,
+    );
+
+  if (missing) {
+    return (
+      <PanelSection>
+        <PanelSectionRow>
+          <Field label="상태" focusable={false}>
+            <StatusValue state={state} />
+          </Field>
+        </PanelSectionRow>
+        {state.message && (
+          <PanelSectionRow>
+            <Field focusable={false} description={state.message} />
+          </PanelSectionRow>
+        )}
+        <PanelSectionRow>
+          <ButtonItem layout="below" disabled={busy} onClick={() => run(installMudfish)}>
+            {busy ? "설치 중… (1~2분)" : `미꾸라지 설치${latest ? ` (${latest})` : ""}`}
+          </ButtonItem>
+        </PanelSectionRow>
+      </PanelSection>
+    );
+  }
 
   return (
     <PanelSection>
@@ -173,15 +214,35 @@ export function Panel() {
         </ButtonItem>
       </PanelSectionRow>
       {advanced && (
-        <PanelSectionRow>
-          <DropdownItem
-            label="일본 노드"
-            rgOptions={options}
-            selectedOption={selected}
-            disabled={busy || state.phase === "connecting"}
-            onChange={(opt) => run(() => setNode(String(opt.data)))}
-          />
-        </PanelSectionRow>
+        <>
+          <PanelSectionRow>
+            <DropdownItem
+              label="일본 노드"
+              rgOptions={options}
+              selectedOption={selected}
+              disabled={busy || state.phase === "connecting"}
+              onChange={(opt) => run(() => setNode(String(opt.data)))}
+            />
+          </PanelSectionRow>
+          <PanelSectionRow>
+            <Field label="미꾸라지" focusable={false}>
+              {version ?? "?"}
+              {latest && !isNewer(latest, version) ? " (최신)" : ""}
+            </Field>
+          </PanelSectionRow>
+          {isNewer(latest, version) && (
+            <PanelSectionRow>
+              <ButtonItem layout="below" disabled={busy || active} onClick={() => run(updateMudfish)}>
+                {busy ? "업데이트 중…" : `미꾸라지 업데이트 (${version} → ${latest})`}
+              </ButtonItem>
+            </PanelSectionRow>
+          )}
+          <PanelSectionRow>
+            <ButtonItem layout="below" disabled={busy} onClick={confirmUninstall}>
+              미꾸라지 제거
+            </ButtonItem>
+          </PanelSectionRow>
+        </>
       )}
     </PanelSection>
   );

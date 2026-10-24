@@ -3,8 +3,10 @@ import tempfile
 import unittest
 
 from mudfish_decky.client import AuthError, SigninError
-from mudfish_decky.controller import (MSG_LOGGED_IN, MSG_MISSING, MSG_NO_LAN, MSG_NO_RESPONSE, MSG_RELOGIN, MSG_RTT,
-                                      MSG_SLEEP, MSG_STILL_UP, MSG_TIMEOUT, Controller)
+from mudfish_decky.controller import (MSG_INSTALLED, MSG_LOGGED_IN, MSG_MISSING, MSG_NO_LAN, MSG_NO_RESPONSE,
+                                      MSG_RELOGIN, MSG_REMOVED, MSG_RTT, MSG_SLEEP, MSG_STILL_UP, MSG_TIMEOUT,
+                                      MSG_UP_TO_DATE, MSG_UPDATE_NEED_OFF, MSG_UPDATED, Controller)
+from mudfish_decky.installer import InstallError
 from mudfish_decky.store import Store
 from tests.test_nodes import STATIC
 
@@ -21,15 +23,31 @@ class FakeSystem:
         self.daemon_calls = 0
         self.ip = {"ip": "13.73.234.162", "country": "JP"}
         self.lan = "192.168.1.50"
+        self.version = "6.6.0"
+        self.daemon_bins = []
+        self.daemon_stops = 0
+        self.nm_removed = 0
 
     def lan_ip(self):
         return self.lan
 
     def find_mudfish(self):
-        return ("/opt/mudfish/6.6.0/bin/mudrun-headless", "/opt/mudfish/6.6.0/var") if self.installed else None
+        if not self.installed:
+            return None
+        return (f"/opt/mudfish/{self.version}/bin/mudrun-headless", f"/opt/mudfish/{self.version}/var")
+
+    def version_of(self, bin_path):
+        return bin_path.split("/")[3]
 
     def ensure_daemon(self, bin_path, is_up):
         self.daemon_calls += 1
+        self.daemon_bins.append(bin_path)
+
+    def stop_daemon(self):
+        self.daemon_stops += 1
+
+    def remove_nm_connection(self):
+        self.nm_removed += 1
 
     def tap_up(self):
         return self.tap
@@ -43,6 +61,39 @@ class FakeSystem:
 
     def public_ip(self):
         return self.ip
+
+
+class FakeInstaller:
+    MUDFISH_ROOT = "/opt/mudfish"
+
+    def __init__(self, system):
+        self.system = system
+        self.latest = "6.7.0"
+        self.calls = []
+
+    def latest_version(self):
+        self.calls.append("latest")
+        return self.latest
+
+    def download(self, version):
+        self.calls.append(("download", version))
+        return b"pkg"
+
+    def install_package(self, data, root):
+        self.calls.append(("install", root))
+        self.system.installed = True
+        self.system.version = self.latest
+        return self.latest
+
+    def carry_login(self, old_var, new_var):
+        self.calls.append(("carry", old_var, new_var))
+
+    def prune_versions(self, root, keep):
+        self.calls.append(("prune", sorted(keep)))
+
+    def remove_all(self, root):
+        self.calls.append(("remove_all", root))
+        self.system.installed = False
 
 
 class FakeRelay:
@@ -435,6 +486,102 @@ class ControllerTest(unittest.TestCase):
         c.start_login()
         c.shutdown()
         self.assertFalse(self.relay.active)
+
+    # ---- install / update / uninstall --------------------------------------------------------
+
+    def make_with_installer(self):
+        self.installer = FakeInstaller(self.system)
+        return Controller(self.client, self.system, Store(self.path), clock=lambda: self.now,
+                          sleep=lambda s: None, installer=self.installer)
+
+    def test_state_reports_versions(self):
+        Store(self.path).save({"latest_version": "6.7.0"})
+        st = self.make_with_installer().state()
+        self.assertEqual(st["mudfish"], {"version": "6.6.0", "latest": "6.7.0"})
+
+    def test_state_missing_reports_no_version(self):
+        self.system.installed = False
+        st = self.make_with_installer().state()
+        self.assertEqual(st["phase"], "missing")
+        self.assertIsNone(st["mudfish"]["version"])
+
+    def test_install_downloads_latest_and_starts_daemon_without_connecting(self):
+        self.system.installed = False
+        st = self.make_with_installer().install()
+        self.assertIn(("download", "6.7.0"), self.installer.calls)
+        self.assertIn(("install", "/opt/mudfish"), self.installer.calls)
+        self.assertEqual(self.system.daemon_bins[-1], "/opt/mudfish/6.7.0/bin/mudrun-headless")
+        self.assertEqual(self.client.start_calls, 0)
+        self.assertEqual(st["phase"], "off")
+        self.assertEqual(st["message"], MSG_INSTALLED.format("6.7.0"))
+        self.assertEqual(st["mudfish"]["version"], "6.7.0")
+
+    def test_install_failure_shows_message(self):
+        self.system.installed = False
+        c = self.make_with_installer()
+        self.installer.install_package = lambda data, root: (_ for _ in ()).throw(InstallError("checksum"))
+        st = c.install()
+        self.assertEqual(st["phase"], "missing")
+        self.assertIn("checksum", st["message"])
+
+    def test_update_refused_while_tunnel_up(self):
+        c = self.make_with_installer()
+        c.connect()
+        st = c.update()
+        self.assertEqual(st["message"], MSG_UPDATE_NEED_OFF)
+        self.assertNotIn(("download", "6.7.0"), self.installer.calls)
+        self.assertEqual(st["phase"], "on")
+
+    def test_update_carries_login_restarts_daemon_and_prunes(self):
+        c = self.make_with_installer()
+        st = c.update()
+        self.assertIn(("carry", "/opt/mudfish/6.6.0/var", "/opt/mudfish/6.7.0/var"), self.installer.calls)
+        self.assertEqual(self.system.daemon_stops, 1)
+        self.assertEqual(self.system.daemon_bins[-1], "/opt/mudfish/6.7.0/bin/mudrun-headless")
+        self.assertIn(("prune", ["6.6.0", "6.7.0"]), self.installer.calls)
+        self.assertEqual(self.client.start_calls, 0)
+        self.assertEqual(st["message"], MSG_UPDATED.format("6.7.0"))
+
+    def test_update_when_already_latest_does_nothing(self):
+        self.make_with_installer()
+        self.installer.latest = "6.6.0"
+        st = Controller(self.client, self.system, Store(self.path), clock=lambda: self.now,
+                        sleep=lambda s: None, installer=self.installer).update()
+        self.assertEqual(st["message"], MSG_UP_TO_DATE)
+        self.assertNotIn(("download", "6.6.0"), self.installer.calls)
+
+    def test_refresh_latest_checks_at_most_daily(self):
+        c = self.make_with_installer()
+        c.refresh_latest()
+        c.refresh_latest()
+        self.assertEqual(self.installer.calls.count("latest"), 1)
+        self.now += 86401
+        c.refresh_latest()
+        self.assertEqual(self.installer.calls.count("latest"), 2)
+        self.assertEqual(Store(self.path).load()["latest_version"], "6.7.0")
+
+    def test_uninstall_turns_off_and_removes_everything(self):
+        c = self.make_with_installer()
+        self.relay = FakeRelay()
+        c.relay_factory = lambda: self.relay
+        c.connect()
+        c.start_login()
+        st = c.uninstall()
+        self.assertEqual(self.client.stop_calls, 1)
+        self.assertFalse(self.relay.active)
+        self.assertEqual(self.system.daemon_stops, 1)
+        self.assertEqual(self.system.nm_removed, 1)
+        self.assertIn(("remove_all", "/opt/mudfish"), self.installer.calls)
+        self.assertEqual(Store(self.path).load(), {})
+        self.assertEqual(st["phase"], "missing")
+        self.assertEqual(st["message"], MSG_REMOVED)
+
+    def test_uninstall_when_missing_still_cleans_up(self):
+        self.system.installed = False
+        c = self.make_with_installer()
+        c.uninstall()
+        self.assertIn(("remove_all", "/opt/mudfish"), self.installer.calls)
+        self.assertEqual(self.client.start_calls, 0)
 
     # ---- sleep / shutdown --------------------------------------------------------------------
 

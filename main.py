@@ -8,13 +8,14 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "py_modules"))
 
 import decky  # noqa: E402
 
-from mudfish_decky import system  # noqa: E402
+from mudfish_decky import installer, system  # noqa: E402
 from mudfish_decky.client import MudfishClient  # noqa: E402
 from mudfish_decky.controller import Controller  # noqa: E402
 from mudfish_decky.relay import LoginRelay  # noqa: E402
 from mudfish_decky.store import Store  # noqa: E402
 
 RESUME_POLL_SECONDS = 2
+LATEST_POLL_TICKS = 1800  # every hour at 2s per tick
 LOGIN_RELAY_SECONDS = 300
 
 
@@ -30,6 +31,7 @@ class Plugin:
             self.controller = Controller(
                 MudfishClient(base), system, store,
                 relay_factory=lambda: LoginRelay(target=(target.hostname, target.port or 80), ttl=LOGIN_RELAY_SECONDS),
+                installer=installer,
             )
         return self.controller
 
@@ -38,6 +40,15 @@ class Plugin:
 
     async def stop_login(self) -> dict:
         return await asyncio.to_thread(self._get_controller().stop_login)
+
+    async def install_mudfish(self) -> dict:
+        return await asyncio.to_thread(self._get_controller().install)
+
+    async def update_mudfish(self) -> dict:
+        return await asyncio.to_thread(self._get_controller().update)
+
+    async def uninstall_mudfish(self) -> dict:
+        return await asyncio.to_thread(self._get_controller().uninstall)
 
     async def get_state(self) -> dict:
         return await asyncio.to_thread(self._get_controller().state)
@@ -64,13 +75,23 @@ class Plugin:
         await asyncio.to_thread(controller.prepare)
         decky.logger.info("Mudfish VPN plugin loaded")
         # Watch for sleep/resume even while the panel is closed; a resumed tunnel is turned off.
+        # Also look for a newer Mudfish release now and then (the controller limits it to once a day).
+        ticks = 0
         while True:
             try:
                 await asyncio.to_thread(controller.check_resume, system.sleep_offset())
+                if ticks % LATEST_POLL_TICKS == 0:
+                    await asyncio.to_thread(controller.refresh_latest)
             except Exception as e:
-                decky.logger.warning("resume check failed: %s", e)
+                decky.logger.warning("background check failed: %s", e)
+            ticks += 1
             await asyncio.sleep(RESUME_POLL_SECONDS)
 
     async def _unload(self):
         await asyncio.to_thread(self._get_controller().shutdown)
         decky.logger.info("Mudfish VPN plugin unloaded")
+
+    async def _uninstall(self):
+        # Removing the plugin removes Mudfish too (user decision): VPN off, daemon stopped, /opt/mudfish gone.
+        await asyncio.to_thread(self._get_controller().uninstall)
+        decky.logger.info("Mudfish removed with the plugin")

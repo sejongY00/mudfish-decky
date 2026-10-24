@@ -35,6 +35,19 @@ class SystemTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as var:
             self.assertEqual(api_base(var), "http://127.0.0.1:8282")
 
+    def test_version_of_binary_path(self):
+        from mudfish_decky.system import version_of
+        self.assertEqual(version_of("/opt/mudfish/6.6.0/bin/mudrun-headless"), "6.6.0")
+
+    def test_stop_daemon_and_remove_nm_connection_commands(self):
+        from mudfish_decky.system import remove_nm_connection, stop_daemon
+        calls = []
+        run = lambda cmd, **kw: calls.append(cmd)  # noqa: E731
+        stop_daemon(run=run)
+        remove_nm_connection(run=run)
+        self.assertEqual(calls, [["systemctl", "stop", "mudfish-decky"],
+                                 ["nmcli", "connection", "delete", "mudfish-tap"]])
+
     def test_lan_ip_from_route_get(self):
         from mudfish_decky.system import lan_ip
         out = "1.1.1.1 via 192.168.1.1 dev wlan0 src 192.168.1.50 uid 0 \n    cache \n"
