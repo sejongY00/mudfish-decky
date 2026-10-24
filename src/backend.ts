@@ -29,6 +29,12 @@ export const setNode = callable<[choice: string], VpnState>("set_node");
 export const listNodes = callable<[], NodeInfo[]>("list_nodes");
 export const startLogin = callable<[], VpnState>("start_login");
 export const stopLogin = callable<[], VpnState>("stop_login");
+export interface PluginRelease {
+  current: string;
+  latest: { version: string; url: string } | null;
+}
+
+export const pluginRelease = callable<[], PluginRelease>("plugin_release");
 export const installMudfish = callable<[], VpnState>("install_mudfish");
 export const updateMudfish = callable<[], VpnState>("update_mudfish");
 export const uninstallMudfish = callable<[], VpnState>("uninstall_mudfish");

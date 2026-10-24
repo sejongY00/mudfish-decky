@@ -1,6 +1,6 @@
 {
   "name": "mudfish-decky",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Toggle Mudfish Cloud VPN Full VPN mode from Steam Deck Gaming Mode",
   "type": "module",
   "scripts": {

@@ -8,7 +8,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "py_modules"))
 
 import decky  # noqa: E402
 
-from mudfish_decky import installer, system  # noqa: E402
+from mudfish_decky import installer, selfupdate, system  # noqa: E402
 from mudfish_decky.client import MudfishClient  # noqa: E402
 from mudfish_decky.controller import Controller  # noqa: E402
 from mudfish_decky.relay import LoginRelay  # noqa: E402
@@ -40,6 +40,10 @@ class Plugin:
 
     async def stop_login(self) -> dict:
         return await asyncio.to_thread(self._get_controller().stop_login)
+
+    async def plugin_release(self) -> dict:
+        latest = await asyncio.to_thread(selfupdate.latest_plugin_release)
+        return {"current": decky.DECKY_PLUGIN_VERSION, "latest": latest}
 
     async def install_mudfish(self) -> dict:
         return await asyncio.to_thread(self._get_controller().install)

@@ -8,6 +8,7 @@ import {
   showModal,
   ToggleField,
 } from "@decky/ui";
+import { toaster } from "@decky/api";
 import { LoginModal } from "./LoginModal";
 import { useEffect, useRef, useState } from "react";
 import {
@@ -21,6 +22,8 @@ import {
   updateMudfish,
   NodeInfo,
   Phase,
+  PluginRelease,
+  pluginRelease,
   setNode,
   VpnState,
 } from "./backend";
@@ -41,6 +44,26 @@ function elapsed(since: number, nowMs: number): string {
   if (minutes < 1) return "방금";
   if (minutes < 60) return `${minutes}분째`;
   return `${Math.floor(minutes / 60)}시간 ${minutes % 60}분째`;
+}
+
+/** Copy via a hidden textarea (works in Steam's CEF where navigator.clipboard is often blocked). */
+function copyText(text: string): boolean {
+  const el = document.createElement("textarea");
+  el.value = text;
+  el.style.position = "fixed";
+  el.style.opacity = "0";
+  document.body.appendChild(el);
+  el.focus();
+  el.select();
+  let ok = false;
+  try {
+    ok = document.execCommand("copy");
+  } catch {
+    ok = false;
+  }
+  el.remove();
+  if (!ok) navigator.clipboard?.writeText(text).catch(() => undefined);
+  return ok;
 }
 
 function rttText(rtt: number | null): string {
@@ -71,6 +94,7 @@ export function Panel() {
   const [busy, setBusy] = useState(false);
   const [advanced, setAdvanced] = useState(false);
   const [nodes, setNodes] = useState<NodeInfo[]>([]);
+  const [release, setRelease] = useState<PluginRelease | null>(null);
   const polling = useRef(false);
   const acting = useRef(false);
 
@@ -93,6 +117,11 @@ export function Panel() {
     const id = setInterval(refresh, STATE_POLL_MS);
     return () => clearInterval(id);
   }, []);
+
+  useEffect(() => {
+    // Fetch ahead of time so the copy happens synchronously inside the button press.
+    if (advanced) pluginRelease().then(setRelease).catch(() => setRelease(null));
+  }, [advanced]);
 
   useEffect(() => {
     if (!advanced) return;
@@ -153,6 +182,18 @@ export function Panel() {
         onOK={() => run(uninstallMudfish)}
       />,
     );
+
+  const copyLatestUrl = () => {
+    const latest = release?.latest;
+    if (!latest) return;
+    const copied = copyText(latest.url);
+    toaster.toast({
+      title: "Mudfish VPN",
+      body: copied
+        ? `v${latest.version} 주소를 복사했어요. 데키 설정 → Install Plugin from URL에 붙여 넣으세요`
+        : `복사하지 못했어요: ${latest.url}`,
+    });
+  };
 
   if (missing) {
     return (
@@ -240,6 +281,21 @@ export function Panel() {
           <PanelSectionRow>
             <ButtonItem layout="below" disabled={busy} onClick={confirmUninstall}>
               미꾸라지 제거
+            </ButtonItem>
+          </PanelSectionRow>
+          <PanelSectionRow>
+            <Field label="플러그인" focusable={false}>
+              {release ? `v${release.current}` : "…"}
+              {release?.latest
+                ? isNewer(release.latest.version, release.current)
+                  ? ` · 최신 v${release.latest.version}`
+                  : " (최신)"
+                : ""}
+            </Field>
+          </PanelSectionRow>
+          <PanelSectionRow>
+            <ButtonItem layout="below" disabled={!release?.latest} onClick={copyLatestUrl}>
+              최신 플러그인 주소 복사
             </ButtonItem>
           </PanelSectionRow>
         </>

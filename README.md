@@ -49,4 +49,6 @@
 3. **Package**: `scripts/package.py`로 `out/mudfish-decky-<버전>.zip`을 만들고 아티팩트로 보관
 4. **Release**: `scripts/gitea_release.py`로 Gitea 릴리스 `v<버전>`을 만들고 zip을 올림
 
+덱에 설치된 플러그인을 업데이트하려면 패널의 **고급 ▸ → 최신 플러그인 주소 복사**를 누르세요. 데키 설정 → **Install Plugin from URL**에 붙여 넣으면 됩니다.
+
 이미 같은 버전의 릴리스가 있으면 Release 단계는 아무것도 하지 않습니다. **새 버전을 내려면 `package.json`의 `version`을 올려서 푸시**하면 됩니다. 업로드에는 Jenkins 자격증명 `gitea-ysj7705`(저장소 쓰기 권한이 있는 Gitea 토큰)를 씁니다.
