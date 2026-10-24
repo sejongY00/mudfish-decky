@@ -2,13 +2,20 @@
 
 스팀덱 게임모드의 데키 패널에서 **미꾸라지(Mudfish) Full VPN**을 켜고 끄는 플러그인입니다. 일본 지포스나우 계정으로 로그인할 때 쓰려고 만들었어요.
 
-## 처음 한 번만 (데스크탑 모드)
+## 처음 한 번만
 
-1. 미꾸라지를 설치합니다. 자세한 방법은 [공식 Steam Deck 가이드](https://docs.mudfish.net/v3/en/docs/mudfish-product/mudfish-cloud-vpn/platform/steamos/steamos-install)를 참고하세요. 설치 위치는 `/opt/mudfish/<버전>`입니다.
-2. 미꾸라지를 실행하고 브라우저에서 `http://127.0.0.1:8282`에 접속해 **'로그인 기억하기'를 체크하고** 로그인합니다.
-3. 플러그인을 `~/homebrew/plugins/mudfish-decky/`에 설치합니다. 개발 환경에서는 `scripts/deploy.sh`를 씁니다.
+1. 플러그인을 `~/homebrew/plugins/mudfish-decky/`에 설치합니다. 개발 환경에서는 `scripts/deploy.sh`를 씁니다.
+2. 게임모드 패널에서 **미꾸라지 설치** 버튼을 누릅니다. `mudfish.net`에서 최신 리눅스 패키지를 받아 MD5를 확인한 뒤, 설치 스크립트를 실행하지 않고 직접 풀어서 `/opt/mudfish/<버전>`에 설치합니다.
+3. **휴대폰으로 로그인 (QR)** 버튼으로 로그인합니다('로그인 기억하기' 체크).
 
 그다음부터는 플러그인이 알아서 미꾸라지를 대기 상태로 띄우고 자동 로그인합니다. **연결은 직접 켤 때만** 합니다.
+
+## 업데이트 / 제거
+
+- **업데이트**: 하루에 한 번 최신 버전을 확인합니다. 새 버전이 있으면 **고급 ▸**에 업데이트 버튼이 나타납니다. VPN을 끈 상태에서만 할 수 있습니다. 로그인 설정은 새 버전으로 옮겨지고, 바로 전 버전 하나는 남깁니다.
+- **제거**: **고급 ▸ → 미꾸라지 제거**를 누릅니다. 또는 데키에서 플러그인을 삭제해도 같이 정리됩니다. 정리 대상은 VPN 연결, 데몬, `/opt/mudfish` 전체, `mudfish-tap` 연결, 플러그인 설정입니다. 미꾸라지 계정에 저장된 Full VPN 노드 설정은 남습니다.
+  - 데키 3.3은 플러그인을 5초 만에 강제 종료하는 경우가 잦습니다. 그래서 별도의 systemd 감시(`mudfish-decky-cleanup.path`)가 플러그인 폴더를 지켜보다가, 폴더가 20초 동안 사라져 있으면 정리를 실행합니다.
+- 공식 설치 방법은 [Steam Deck 가이드](https://docs.mudfish.net/v3/en/docs/mudfish-product/mudfish-cloud-vpn/platform/steamos/steamos-install)를 참고하세요.
 
 ## 사용법 (게임모드)
 
