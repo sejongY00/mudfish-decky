@@ -42,13 +42,41 @@ def version_of(bin_path: str) -> str:
     return os.path.basename(os.path.dirname(os.path.dirname(bin_path)))
 
 
-def stop_daemon(run=subprocess.run) -> None:
-    run(["systemctl", "stop", DAEMON_UNIT], capture_output=True, timeout=20)
+def stop_daemon(run=subprocess.run, wait: bool = True) -> None:
+    cmd = ["systemctl", "stop", DAEMON_UNIT] + ([] if wait else ["--no-block"])
+    run(cmd, capture_output=True, timeout=20)
 
 
 def remove_nm_connection(run=subprocess.run) -> None:
     """Mudfish registers a NetworkManager connection for tap0; it is normally removed on stop."""
     run(["nmcli", "connection", "delete", "mudfish-tap"], capture_output=True, timeout=10)
+
+
+CLEANUP_UNIT = "mudfish-decky-cleanup"
+CLEANUP_DELAY = 20
+
+
+def ensure_cleanup_watcher(plugin_dir: str, settings_dir: str, run=subprocess.run) -> None:
+    """Remove Mudfish when the plugin is uninstalled, independently of the plugin process.
+
+    Decky 3.3 often SIGKILLs plugins before _uninstall runs, so a transient systemd path unit watches
+    the plugins directory; when this plugin's folder has stayed gone for CLEANUP_DELAY seconds (not a
+    reinstall/update), it stops the daemon and deletes /opt/mudfish and the plugin settings.
+    """
+    if run(["systemctl", "is-active", "--quiet", f"{CLEANUP_UNIT}.path"],
+           capture_output=True, timeout=10).returncode == 0:
+        return
+    script = "; ".join([
+        f"sleep {CLEANUP_DELAY}",
+        f'[ -e "{plugin_dir}/plugin.json" ] && exit 0',
+        f"systemctl stop {DAEMON_UNIT}",
+        "nmcli connection delete mudfish-tap",
+        f"rm -rf {MUDFISH_ROOT}",
+        f'rm -rf "{settings_dir}"',
+        f"systemctl stop {CLEANUP_UNIT}.path",
+    ])
+    run(["systemd-run", f"--unit={CLEANUP_UNIT}", f"--path-property=PathChanged={os.path.dirname(plugin_dir)}",
+         "/bin/sh", "-c", script], capture_output=True, timeout=10)
 
 
 def api_base(var_dir: str) -> str:

@@ -48,6 +48,40 @@ class SystemTest(unittest.TestCase):
         self.assertEqual(calls, [["systemctl", "stop", "mudfish-decky"],
                                  ["nmcli", "connection", "delete", "mudfish-tap"]])
 
+    def test_cleanup_watcher_created_when_missing(self):
+        from mudfish_decky.system import CLEANUP_UNIT, ensure_cleanup_watcher
+        calls = []
+
+        def run(cmd, **kw):
+            calls.append(cmd)
+            return types.SimpleNamespace(returncode=3 if cmd[:2] == ["systemctl", "is-active"] else 0)
+
+        ensure_cleanup_watcher("/home/deck/homebrew/plugins/mudfish-decky",
+                               "/home/deck/homebrew/settings/mudfish-decky", run=run)
+        self.assertEqual(calls[0], ["systemctl", "is-active", "--quiet", f"{CLEANUP_UNIT}.path"])
+        cmd = calls[1]
+        self.assertEqual(cmd[:3], ["systemd-run", f"--unit={CLEANUP_UNIT}",
+                                   "--path-property=PathChanged=/home/deck/homebrew/plugins"])
+        script = cmd[-1]
+        self.assertIn("sleep 20", script)
+        self.assertIn('[ -e "/home/deck/homebrew/plugins/mudfish-decky/plugin.json" ] && exit 0', script)
+        self.assertIn("rm -rf /opt/mudfish", script)
+        self.assertIn('rm -rf "/home/deck/homebrew/settings/mudfish-decky"', script)
+        self.assertIn(f"systemctl stop {CLEANUP_UNIT}.path", script)
+        # the plugin-dir check must come before anything destructive
+        self.assertLess(script.index("plugin.json"), script.index("rm -rf"))
+
+    def test_cleanup_watcher_not_recreated_when_active(self):
+        from mudfish_decky.system import ensure_cleanup_watcher
+        calls = []
+
+        def run(cmd, **kw):
+            calls.append(cmd)
+            return types.SimpleNamespace(returncode=0)
+
+        ensure_cleanup_watcher("/p/mudfish-decky", "/s/mudfish-decky", run=run)
+        self.assertEqual(len(calls), 1)
+
     def test_lan_ip_from_route_get(self):
         from mudfish_decky.system import lan_ip
         out = "1.1.1.1 via 192.168.1.1 dev wlan0 src 192.168.1.50 uid 0 \n    cache \n"

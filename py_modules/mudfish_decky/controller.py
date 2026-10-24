@@ -170,7 +170,7 @@ class Controller:
                     self._teardown()
             except Exception as e:
                 log.warning("uninstall: teardown failed: %s", e)
-            for step in (self.system.stop_daemon, self.system.remove_nm_connection,
+            for step in (lambda: self.system.stop_daemon(wait=False), self.system.remove_nm_connection,
                          lambda: self.installer.remove_all(self.installer.MUDFISH_ROOT)):
                 try:
                     step()

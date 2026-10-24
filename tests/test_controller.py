@@ -43,7 +43,7 @@ class FakeSystem:
         self.daemon_calls += 1
         self.daemon_bins.append(bin_path)
 
-    def stop_daemon(self):
+    def stop_daemon(self, wait=True):
         self.daemon_stops += 1
 
     def remove_nm_connection(self):

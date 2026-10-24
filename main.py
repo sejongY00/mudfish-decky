@@ -73,13 +73,16 @@ class Plugin:
         controller = self._get_controller()
         # Bring up the idle launcher and sign in so nodes are listed. Never starts the tunnel.
         await asyncio.to_thread(controller.prepare)
+        # Clean up Mudfish if the plugin folder disappears (uninstall), even if Decky kills us first.
+        plugin_dir = os.path.dirname(os.path.abspath(__file__))
+        await asyncio.to_thread(system.ensure_cleanup_watcher, plugin_dir, decky.DECKY_PLUGIN_SETTINGS_DIR)
         decky.logger.info("Mudfish VPN plugin loaded")
         # Watch for sleep/resume even while the panel is closed; a resumed tunnel is turned off.
         # Also look for a newer Mudfish release now and then (the controller limits it to once a day).
         ticks = 0
         while True:
             try:
-                await asyncio.to_thread(controller.check_resume, system.sleep_offset())
+                controller.check_resume(system.sleep_offset())
                 if ticks % LATEST_POLL_TICKS == 0:
                     await asyncio.to_thread(controller.refresh_latest)
             except Exception as e:
@@ -87,11 +90,14 @@ class Plugin:
             ticks += 1
             await asyncio.sleep(RESUME_POLL_SECONDS)
 
+    # _unload/_uninstall run synchronously on purpose: Decky closes the plugin socket right after
+    # asking it to stop, and its listener then spins on EOF and starves the event loop, so an
+    # awaited worker thread would never resume and the plugin is SIGKILLed after 5 seconds.
     async def _unload(self):
-        await asyncio.to_thread(self._get_controller().shutdown)
+        self._get_controller().shutdown()
         decky.logger.info("Mudfish VPN plugin unloaded")
 
     async def _uninstall(self):
         # Removing the plugin removes Mudfish too (user decision): VPN off, daemon stopped, /opt/mudfish gone.
-        await asyncio.to_thread(self._get_controller().uninstall)
+        self._get_controller().uninstall()
         decky.logger.info("Mudfish removed with the plugin")
