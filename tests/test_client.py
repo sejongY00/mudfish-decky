@@ -24,6 +24,22 @@ class FakeTransport:
         return [c for c in self.calls if c[0] == method and c[1] == url]
 
 
+class SslContextTest(unittest.TestCase):
+    def test_uses_first_existing_system_bundle(self):
+        import ssl
+        from mudfish_decky.client import ssl_context
+        loaded = []
+
+        class Ctx:
+            def load_verify_locations(self, cafile):
+                loaded.append(cafile)
+
+        ctx = ssl_context(["/nope/a.pem", __file__, "/nope/b.pem"], factory=lambda: Ctx())
+        self.assertIsInstance(ctx, Ctx)
+        self.assertEqual(loaded, [__file__])
+        self.assertIsInstance(ssl_context([], factory=ssl.create_default_context), ssl.SSLContext)
+
+
 class ClientTest(unittest.TestCase):
     def test_ensure_signed_in_noop_when_signed(self):
         t = FakeTransport({("GET", BASE + "/do/mudrun/status"): [dict(SIGNED_OUT, isSignedIn=True)]})

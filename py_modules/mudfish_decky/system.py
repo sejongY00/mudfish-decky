@@ -6,6 +6,7 @@ import time
 import urllib.request
 from typing import Callable, Optional, Tuple
 
+from .client import ssl_context
 from .routes import delete_routes  # noqa: F401  (re-exported for the controller)
 
 MUDFISH_ROOT = "/opt/mudfish"
@@ -66,7 +67,7 @@ def route_text(run=subprocess.run) -> str:
 
 def public_ip() -> Optional[dict]:
     try:
-        with urllib.request.urlopen("https://ipinfo.io/json", timeout=8) as resp:
+        with urllib.request.urlopen("https://ipinfo.io/json", timeout=8, context=ssl_context()) as resp:
             data = json.load(resp)
         return {"ip": data.get("ip"), "country": data.get("country")}
     except Exception:

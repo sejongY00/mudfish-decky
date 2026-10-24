@@ -7,6 +7,6 @@ DECK="${DECK:-deck@192.168.1.50}"
 pnpm build
 tar --exclude='__pycache__' -cf - dist main.py plugin.json package.json py_modules | ssh "$DECK" '
   D=/home/deck/homebrew/plugins/mudfish-decky
-  sudo rm -rf "$D" && sudo mkdir -p "$D" && sudo tar -xf - -C "$D" &&
+  sudo rm -rf "$D" && sudo mkdir -p "$D" && sudo tar --no-same-owner -xf - -C "$D" &&
   sudo systemctl restart plugin_loader'
 echo "deployed to $DECK"

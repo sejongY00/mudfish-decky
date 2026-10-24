@@ -1,5 +1,7 @@
 """HTTP calls to the local Mudfish launcher API and the Mudfish cloud API."""
 import json
+import os
+import ssl
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -25,10 +27,26 @@ class SigninError(MudfishError):
     pass
 
 
+# Decky's bundled Python ships without a CA store, so point it at SteamOS's system bundle.
+SYSTEM_CA_BUNDLES = ["/etc/ssl/certs/ca-certificates.crt", "/etc/ca-certificates/extracted/tls-ca-bundle.pem"]
+
+
+def ssl_context(cafiles=SYSTEM_CA_BUNDLES, factory=ssl.create_default_context):
+    ctx = factory()
+    for path in cafiles:
+        if os.path.isfile(path):
+            ctx.load_verify_locations(cafile=path)
+            break
+    return ctx
+
+
+_SSL = ssl_context()
+
+
 def urllib_transport(method, url, body, headers):
     req = urllib.request.Request(url, data=body, headers=headers, method=method)
     try:
-        with urllib.request.urlopen(req, timeout=10) as resp:
+        with urllib.request.urlopen(req, timeout=10, context=_SSL) as resp:
             return resp.status, resp.read()
     except urllib.error.HTTPError as e:
         return e.code, e.read()

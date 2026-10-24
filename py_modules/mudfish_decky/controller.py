@@ -43,6 +43,18 @@ class Controller:
         with self._lock:
             return self._state()
 
+    def prepare(self) -> None:
+        """Plugin load: bring up the idle launcher and sign in so the node list is ready. Never connects."""
+        with self._lock:
+            installed = self.system.find_mudfish()
+            if not installed:
+                return
+            try:
+                st = self._signed_in(installed)
+                self._static_nodes(st)
+            except Exception as e:
+                log.warning("prepare: %s", e)
+
     def nodes(self) -> list:
         with self._lock:
             self._refresh_rtts()
@@ -127,10 +139,10 @@ class Controller:
         return bool(st.get("core_running") and st.get("client_ready") and self.system.tap_up())
 
     def _signed_in(self, installed) -> dict:
-        self.system.ensure_daemon(installed[0], self._daemon_up)
+        self.system.ensure_daemon(installed[0], self.daemon_up)
         return self.client.ensure_signed_in()
 
-    def _daemon_up(self) -> bool:
+    def daemon_up(self) -> bool:
         try:
             self.client.status()
             return True

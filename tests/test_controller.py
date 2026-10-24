@@ -238,6 +238,22 @@ class ControllerTest(unittest.TestCase):
         self.assertEqual(st["node_mode"], "auto")
         self.assertEqual(st["node"]["sid"], 11)
 
+    def test_prepare_signs_in_and_caches_nodes_without_starting(self):
+        self.client.st["isSignedIn"] = False
+        signed = []
+        self.client.ensure_signed_in = lambda: signed.append(1) or dict(self.client.st, isSignedIn=True)
+        c = self.make()
+        c.prepare()
+        self.assertEqual(self.system.daemon_calls, 1)
+        self.assertEqual(signed, [1])
+        self.assertEqual(self.client.start_calls, 0)
+        self.assertEqual([n["sid"] for n in Store(self.path).load()["static_nodes"]], [9, 11, 46, 300])
+
+    def test_prepare_tolerates_signin_failure(self):
+        self.client.signin_error = SigninError("401")
+        self.make().prepare()
+        self.assertEqual(self.client.start_calls, 0)
+
     def test_nodes_lists_japan_by_ping(self):
         self.assertEqual([n["sid"] for n in self.make().nodes()], [11, 9, 46])
 
