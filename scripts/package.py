@@ -26,7 +26,8 @@ def _files(src: str):
             for root, dirs, files in os.walk(path):
                 dirs[:] = sorted(d for d in dirs if d != "__pycache__")
                 for name in sorted(files):
-                    if not name.endswith(".pyc"):
+                    # bytecode is rebuilt on the Deck; source maps are only for debugging
+                    if not name.endswith((".pyc", ".map")):
                         yield os.path.relpath(os.path.join(root, name), src)
 
 
