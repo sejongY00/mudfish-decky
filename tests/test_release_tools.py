@@ -26,6 +26,7 @@ def make_tree(root, version="0.3.1"):
         "main.py": "print('x')",
         "README.md": "# readme",
         "dist/index.js": "js",
+        "dist/index.js.map": "source map: debugging only, not shipped",
         "py_modules/mudfish_decky/__init__.py": "",
         "py_modules/mudfish_decky/nodes.py": "x = 1",
         "py_modules/mudfish_decky/__pycache__/nodes.cpython-314.pyc": "junk",
