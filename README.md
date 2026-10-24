@@ -4,7 +4,7 @@
 
 ## 처음 한 번만
 
-1. 플러그인을 `~/homebrew/plugins/mudfish-decky/`에 설치합니다. 개발 환경에서는 `scripts/deploy.sh`를 씁니다.
+1. 플러그인을 설치합니다. [릴리스](https://git.sejong.dev/ysj7705/mudfish-decky/releases)에서 `mudfish-decky-<버전>.zip`의 주소를 복사한 뒤, 데키 설정 → 개발자 모드 → **Install Plugin from URL**에 붙여 넣습니다. zip 파일을 직접 받아서 **Install Plugin from ZIP**으로 설치해도 됩니다.
 2. 게임모드 패널에서 **미꾸라지 설치** 버튼을 누릅니다. `mudfish.net`에서 최신 리눅스 패키지를 받아 MD5를 확인한 뒤, 설치 스크립트를 실행하지 않고 직접 풀어서 `/opt/mudfish/<버전>`에 설치합니다.
 3. **휴대폰으로 로그인 (QR)** 버튼으로 로그인합니다('로그인 기억하기' 체크).
 
@@ -39,3 +39,14 @@
 - 파이썬 테스트는 스팀덱에서 실행합니다: `bash scripts/test.sh`
 - 빌드와 배포: `bash scripts/deploy.sh`. 덱의 `deck` 계정에 **sudo 비밀번호 없음 설정이 있어야** 동작합니다. 개발용 설정을 지운 뒤에는 쓸 수 없고, 다시 배포하려면 그 설정을 잠시 되살려야 합니다.
 - 설계: `docs/superpowers/specs/2026-10-24-mudfish-decky-design.md`
+
+## 릴리스 (Jenkins)
+
+`main`에 푸시하면 Jenkins(`Jenkinsfile`)가 다음 단계를 차례로 실행합니다.
+
+1. **Test**: `python:3.14-slim`에서 단위 테스트
+2. **Build**: `node:22`에서 pnpm 빌드
+3. **Package**: `scripts/package.py`로 `out/mudfish-decky-<버전>.zip`을 만들고 아티팩트로 보관
+4. **Release**: `scripts/gitea_release.py`로 Gitea 릴리스 `v<버전>`을 만들고 zip을 올림
+
+이미 같은 버전의 릴리스가 있으면 Release 단계는 아무것도 하지 않습니다. **새 버전을 내려면 `package.json`의 `version`을 올려서 푸시**하면 됩니다. 업로드에는 Jenkins 자격증명 `gitea-ysj7705`(저장소 쓰기 권한이 있는 Gitea 토큰)를 씁니다.

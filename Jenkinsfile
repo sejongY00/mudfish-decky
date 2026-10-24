@@ -9,8 +9,9 @@ pipeline {
   environment {
     GITEA_URL = 'https://git.sejong.dev'
     GITEA_REPO = 'ysj7705/mudfish-decky'
-    // Secret text credential: a Gitea access token allowed to write this repository's releases.
-    GITEA_CREDENTIALS_ID = 'gitea-release-token'
+    // The organization folder's Gitea token (Gitea plugin credentials also bind as a string).
+    // It must be allowed to write this repository's releases.
+    GITEA_CREDENTIALS_ID = 'gitea-ysj7705'
     PYTHON_IMAGE = 'python:3.14-slim'
     NODE_IMAGE = 'node:22-bookworm'
     PNPM = 'npx -y pnpm@9.15.9'
