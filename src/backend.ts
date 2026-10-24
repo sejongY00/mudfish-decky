@@ -16,6 +16,7 @@ export interface VpnState {
   ip: string | null;
   country: string | null;
   connected_since: number | null;
+  tunnel: boolean;
 }
 
 export const getState = callable<[], VpnState>("get_state");

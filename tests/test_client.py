@@ -1,7 +1,7 @@
 import json
 import unittest
 
-from mudfish_decky.client import MudfishClient, MudfishError, SigninError
+from mudfish_decky.client import AuthError, MudfishClient, MudfishError, SigninError
 
 BASE = "http://127.0.0.1:8282"
 SIGNED_OUT = {"status": 200, "isSignedIn": False, "username": "u", "token_v3": "123",
@@ -73,6 +73,44 @@ class ClientTest(unittest.TestCase):
         })
         with self.assertRaises(SigninError):
             MudfishClient(BASE, t).ensure_signed_in()
+
+    def test_ensure_signed_in_force_skips_shortcut(self):
+        t = FakeTransport({
+            ("GET", BASE + "/do/mudrun/status"): [dict(SIGNED_OUT, isSignedIn=True)],
+            ("POST", "https://api.mudfish.net/signin_ng_v3"): [SIGNIN_OK],
+            ("POST", BASE + "/do/auth"): [{"status": 200, "msg": "OK"}],
+        })
+        MudfishClient(BASE, t).ensure_signed_in(force=True)
+        self.assertEqual(len(t.calls_to("POST", "https://api.mudfish.net/signin_ng_v3")), 1)
+
+    def test_ensure_signed_in_http_401_is_signin_error(self):
+        t = FakeTransport({("GET", BASE + "/do/mudrun/status"): [SIGNED_OUT]})
+        real = t.__call__
+
+        def transport(method, url, body, headers):
+            if "signin_ng_v3" in url:
+                return 401, b"{}"
+            return real(method, url, body, headers)
+
+        with self.assertRaises(SigninError):
+            MudfishClient(BASE, transport).ensure_signed_in()
+
+    def test_ensure_signed_in_without_token_is_signin_error(self):
+        t = FakeTransport({("GET", BASE + "/do/mudrun/status"): [dict(SIGNED_OUT, autologin=True, token_v3="")]})
+        with self.assertRaises(SigninError):
+            MudfishClient(BASE, t).ensure_signed_in()
+
+    def test_graphql_without_user_is_auth_error(self):
+        t = FakeTransport({("POST", "https://api.mudfish.net/graphql"): [{"errors": ["unauthorized"]}]})
+        with self.assertRaises(AuthError):
+            MudfishClient(BASE, t).prog_conf("JWT", "api.mudfish.net")
+
+    def test_prog_http_401_is_auth_error(self):
+        def transport(method, url, body, headers):
+            return 401, b"{}"
+
+        with self.assertRaises(AuthError):
+            MudfishClient(BASE, transport).save_prog_conf("JWT", "api.mudfish.net", {})
 
     def test_start_accepts_201(self):
         t = FakeTransport({("POST", BASE + "/do/mudfish/start"): [{"status": 201}]})

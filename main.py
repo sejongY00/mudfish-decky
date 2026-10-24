@@ -12,6 +12,8 @@ from mudfish_decky.client import MudfishClient  # noqa: E402
 from mudfish_decky.controller import Controller  # noqa: E402
 from mudfish_decky.store import Store  # noqa: E402
 
+RESUME_POLL_SECONDS = 2
+
 
 class Plugin:
     controller = None
@@ -44,9 +46,18 @@ class Plugin:
         log.setLevel(logging.INFO)
         for handler in decky.logger.handlers:
             log.addHandler(handler)
+        controller = self._get_controller()
         # Bring up the idle launcher and sign in so nodes are listed. Never starts the tunnel.
-        await asyncio.to_thread(self._get_controller().prepare)
+        await asyncio.to_thread(controller.prepare)
         decky.logger.info("Mudfish VPN plugin loaded")
+        # Watch for sleep/resume even while the panel is closed; a resumed tunnel is turned off.
+        while True:
+            try:
+                await asyncio.to_thread(controller.check_resume, system.sleep_offset())
+            except Exception as e:
+                decky.logger.warning("resume check failed: %s", e)
+            await asyncio.sleep(RESUME_POLL_SECONDS)
 
     async def _unload(self):
+        await asyncio.to_thread(self._get_controller().shutdown)
         decky.logger.info("Mudfish VPN plugin unloaded")

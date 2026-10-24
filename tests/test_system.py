@@ -35,6 +35,12 @@ class SystemTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as var:
             self.assertEqual(api_base(var), "http://127.0.0.1:8282")
 
+    def test_sleep_offset_is_boottime_minus_monotonic(self):
+        from mudfish_decky.system import sleep_offset
+        clocks = {"boot": 500.0, "mono": 420.0}
+        self.assertEqual(sleep_offset(lambda c: clocks["boot"] if c == "boot" else clocks["mono"],
+                                      boot="boot", mono="mono"), 80.0)
+
     def test_ensure_daemon_noop_when_up(self):
         calls = []
         ensure_daemon("/bin/x", lambda: True, run=lambda cmd, **kw: calls.append(cmd))

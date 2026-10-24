@@ -57,6 +57,12 @@ def ensure_daemon(bin_path: str, is_up: Callable[[], bool], run=subprocess.run, 
             return
 
 
+def sleep_offset(clock=time.clock_gettime, boot=getattr(time, "CLOCK_BOOTTIME", None),
+                 mono=time.CLOCK_MONOTONIC) -> float:
+    """Total time spent suspended since boot: BOOTTIME keeps counting during suspend, MONOTONIC doesn't."""
+    return clock(boot) - clock(mono)
+
+
 def tap_up() -> bool:
     return os.path.exists("/sys/class/net/tap0")
 

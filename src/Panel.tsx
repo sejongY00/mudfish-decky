@@ -65,12 +65,17 @@ export function Panel() {
   const [advanced, setAdvanced] = useState(false);
   const [nodes, setNodes] = useState<NodeInfo[]>([]);
   const polling = useRef(false);
+  const acting = useRef(false);
 
   const refresh = async () => {
     if (polling.current) return;
     polling.current = true;
     try {
-      setState(await getState());
+      const next = await getState();
+      // A poll that started before a toggle press would overwrite the action's result.
+      if (!acting.current) setState(next);
+    } catch (e) {
+      console.error("mudfish: getState failed", e);
     } finally {
       polling.current = false;
     }
@@ -84,18 +89,28 @@ export function Panel() {
 
   useEffect(() => {
     if (!advanced) return;
-    const load = async () => setNodes(await listNodes());
+    const load = async () => {
+      try {
+        setNodes(await listNodes());
+      } catch (e) {
+        console.error("mudfish: listNodes failed", e);
+      }
+    };
     load();
     const id = setInterval(load, NODES_POLL_MS);
     return () => clearInterval(id);
   }, [advanced]);
 
   const run = async (action: () => Promise<VpnState>, pending?: Phase) => {
+    acting.current = true;
     setBusy(true);
     if (pending && state) setState({ ...state, phase: pending, message: null });
     try {
       setState(await action());
+    } catch (e) {
+      if (state) setState({ ...state, phase: "error", message: `요청 실패: ${e}` });
     } finally {
+      acting.current = false;
       setBusy(false);
     }
   };
@@ -110,7 +125,8 @@ export function Panel() {
     );
   }
 
-  const active = state.phase === "on" || state.phase === "connecting";
+  // Checked whenever any tunnel exists (even a stuck one), so the toggle can always turn it off.
+  const active = state.tunnel || state.phase === "on" || state.phase === "connecting";
   const options = [
     { data: "auto", label: "자동 (핑 최저)" },
     ...nodes.map((n) => ({ data: String(n.sid), label: `${n.label} · ${rttText(n.rtt)}` })),
@@ -128,7 +144,7 @@ export function Panel() {
         <ToggleField
           label="미꾸라지 Full VPN"
           checked={active}
-          disabled={busy || state.phase === "connecting" || state.phase === "missing"}
+          disabled={busy || state.phase === "missing"}
           onChange={(on) => run(on ? connect : disconnect, on ? "connecting" : undefined)}
         />
       </PanelSectionRow>
