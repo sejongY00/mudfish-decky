@@ -85,6 +85,8 @@ class Controller:
         try:
             st = self._signed_in(installed)
             self._static_nodes(st)
+            if not self._tunnel_present():
+                self._restore_account()  # a restore left pending by the last session
         except SigninError as e:
             log.warning("prepare: saved login rejected: %s", e)
             self._error = MSG_RELOGIN
@@ -168,6 +170,7 @@ class Controller:
             try:
                 if self._tunnel_present():
                     self._teardown()
+                self._restore_account()  # needs the daemon's session, so before stopping it
             except Exception as e:
                 log.warning("uninstall: teardown failed: %s", e)
             for step in (lambda: self.system.stop_daemon(wait=False), self.system.remove_nm_connection,
@@ -286,6 +289,12 @@ class Controller:
             self._close_relay()
             return self._state()
 
+    def retry_restore(self) -> None:
+        """Background retry of a pending account restore; never while a tunnel is up."""
+        with self._lock:
+            if self.store.load().get("fullvpn_restore") and not self._tunnel_present():
+                self._restore_account()
+
     def shutdown(self) -> None:
         """Plugin unload (Deck shutdown/restart, Decky restart): never leave a tunnel or relay behind."""
         with self._lock:
@@ -312,8 +321,11 @@ class Controller:
     def _abort(self, started: bool, message: str) -> dict:
         if message == MSG_RELOGIN:
             self._mark_need_login()
-        if started and not self._teardown():
-            message = MSG_STILL_UP
+        if started:
+            if not self._teardown():
+                message = MSG_STILL_UP
+        else:
+            self._restore_account()  # the account may already point at our node
         return self._fail(message)
 
     def _track_login(self, st: Optional[dict]) -> None:
@@ -361,6 +373,29 @@ class Controller:
             log.warning("route cleanup failed: %s", e)
         self.store.update(routes_before=None, connected_since=None, active_sid=None)
         self._ip_cache = (0.0, None)
+        self._restore_account()
+        return True
+
+    def _restore_account(self) -> bool:
+        """Put the account's Full VPN node back to what it was before we connected.
+        On failure the saved value stays and retry_restore()/prepare() try again later."""
+        saved = self.store.load().get("fullvpn_restore")
+        if not saved:
+            return True
+
+        def put_back(st):
+            conf = self.client.prog_conf(st["jwt"], st["api_server"])
+            if (conf.get("mudfishFullvpnSid") or 0, conf.get("mudfishFullvpnVid") or 0) != (saved["sid"], saved["vid"]):
+                conf.update(mudfishFullvpnSid=saved["sid"], mudfishFullvpnVid=saved["vid"])
+                self.client.save_prog_conf(st["jwt"], st["api_server"], conf)
+
+        try:
+            self._with_auth_retry(self.client.ensure_signed_in(), put_back)
+        except Exception as e:
+            log.warning("restoring the account Full VPN setting failed: %s", e)
+            return False
+        self.store.update(fullvpn_restore=None)
+        log.info("account Full VPN setting restored (sid=%s)", saved["sid"])
         return True
 
     def _is_on(self, st: dict) -> bool:
@@ -439,6 +474,10 @@ class Controller:
         conf = self.client.prog_conf(st["jwt"], st["api_server"])
         if conf.get("mudfishFullvpnSid") == sid and not conf.get("mudfishFullvpnVid"):
             return {"need_restart": False, "conf": conf, "changed": False}
+        if not self.store.load().get("fullvpn_restore"):
+            # Remember the account's own setting (e.g. what the PC uses) once, to put back on teardown.
+            self.store.update(fullvpn_restore={"sid": conf.get("mudfishFullvpnSid") or 0,
+                                               "vid": conf.get("mudfishFullvpnVid") or 0})
         conf.update(mudfishFullvpnSid=sid, mudfishFullvpnVid=0)
         resp = self.client.save_prog_conf(st["jwt"], st["api_server"], conf)
         return {"need_restart": bool(resp.get("need_restart")), "conf": conf, "changed": True}
@@ -473,7 +512,7 @@ class Controller:
         data = self.store.load()
         out = {"phase": "off", "message": None, "node_mode": data.get("node_mode") or "auto", "node": None,
                "ip": None, "country": None, "connected_since": None, "tunnel": False,
-               "need_login": False, "login": None, "mudfish": None}
+               "need_login": False, "login": None, "mudfish": None, "restore_pending": False}
         installed = self.system.find_mudfish()
         out["mudfish"] = {"version": self.system.version_of(installed[0]) if installed else None,
                           "latest": data.get("latest_version")}
@@ -491,6 +530,7 @@ class Controller:
         tap = self.system.tap_up()
         on = bool(st) and self._is_on(st)
         out["tunnel"] = tap or bool(st and st.get("core_running"))
+        out["restore_pending"] = bool(self.store.load().get("fullvpn_restore")) and not out["tunnel"]
         if st:
             self._refresh_rtts()
         if on:

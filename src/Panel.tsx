@@ -242,6 +242,11 @@ export function Panel() {
           <Field focusable={false} description={state.message} />
         </PanelSectionRow>
       )}
+      {state.restore_pending && (
+        <PanelSectionRow>
+          <Field focusable={false} description="계정 Full VPN 설정 복구 대기 중 (자동으로 다시 시도해요)" />
+        </PanelSectionRow>
+      )}
       {state.need_login && (
         <PanelSectionRow>
           <ButtonItem layout="below" onClick={() => showModal(<LoginModal />)}>

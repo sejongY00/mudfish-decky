@@ -16,6 +16,7 @@ from mudfish_decky.store import Store  # noqa: E402
 
 RESUME_POLL_SECONDS = 2
 LATEST_POLL_TICKS = 1800  # every hour at 2s per tick
+RESTORE_RETRY_TICKS = 30  # retry a pending account restore every minute
 LOGIN_RELAY_SECONDS = 300
 
 
@@ -89,6 +90,8 @@ class Plugin:
                 controller.check_resume(system.sleep_offset())
                 if ticks % LATEST_POLL_TICKS == 0:
                     await asyncio.to_thread(controller.refresh_latest)
+                if ticks % RESTORE_RETRY_TICKS == 0:
+                    await asyncio.to_thread(controller.retry_restore)
             except Exception as e:
                 decky.logger.warning("background check failed: %s", e)
             ticks += 1

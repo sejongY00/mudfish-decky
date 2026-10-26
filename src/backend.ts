@@ -20,6 +20,7 @@ export interface VpnState {
   need_login: boolean;
   login: { url: string; expires_at: number } | null;
   mudfish: { version: string | null; latest: string | null } | null;
+  restore_pending: boolean;
 }
 
 export const getState = callable<[], VpnState>("get_state");
