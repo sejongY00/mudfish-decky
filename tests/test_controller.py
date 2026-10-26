@@ -2,7 +2,7 @@ import os
 import tempfile
 import unittest
 
-from mudfish_decky.client import AuthError, SigninError
+from mudfish_decky.client import AuthError, MudfishError, SigninError
 from mudfish_decky.controller import (MSG_INSTALLED, MSG_LOGGED_IN, MSG_MISSING, MSG_NO_LAN, MSG_NO_RESPONSE,
                                       MSG_RELOGIN, MSG_REMOVED, MSG_RTT, MSG_SLEEP, MSG_STILL_UP, MSG_TIMEOUT,
                                       MSG_UP_TO_DATE, MSG_UPDATE_NEED_OFF, MSG_UPDATED, Controller)
@@ -246,17 +246,103 @@ class ControllerTest(unittest.TestCase):
         c.connect()
         self.assertEqual(self.client.conf["mudfishFullvpnSid"], 9)
 
-    def test_disconnect_deletes_only_new_routes_and_keeps_sid(self):
+    def test_disconnect_deletes_only_new_routes(self):
         c = self.make()
         c.connect()
-        saves = len(self.client.saved)
         st = c.disconnect()
         self.assertEqual(self.system.deleted,
                          ["1.201.174.247 via 192.168.1.1 dev wlan0", "2.58.243.110 via 192.168.1.1 dev wlan0"])
-        self.assertEqual(len(self.client.saved), saves)
-        self.assertEqual(self.client.conf["mudfishFullvpnSid"], 11)
         self.assertEqual(st["phase"], "off")
         self.assertIsNone(Store(self.path).load().get("connected_since"))
+
+    # ---- account Full VPN setting is restored when the tunnel goes down ------------------------
+
+    def test_connect_remembers_original_fullvpn_setting(self):
+        self.client.conf.update(mudfishFullvpnSid=0, mudfishFullvpnVid=5)
+        self.make().connect()
+        self.assertEqual(Store(self.path).load()["fullvpn_restore"], {"sid": 0, "vid": 5})
+
+    def test_disconnect_restores_original_fullvpn_setting(self):
+        self.client.conf.update(mudfishFullvpnSid=0, mudfishFullvpnVid=5)
+        c = self.make()
+        c.connect()
+        st = c.disconnect()
+        self.assertEqual((self.client.conf["mudfishFullvpnSid"], self.client.conf["mudfishFullvpnVid"]), (0, 5))
+        self.assertEqual(self.client.conf["mudfishMtu"], 1350)
+        self.assertIsNone(Store(self.path).load().get("fullvpn_restore"))
+        self.assertFalse(st["restore_pending"])
+
+    def test_restore_keeps_first_original_across_node_change(self):
+        c = self.make()
+        c.connect()                       # 0 -> 11
+        self.client.need_restart = False
+        c.set_node("9")                   # 11 -> 9 while on
+        c.disconnect()
+        self.assertEqual(self.client.conf["mudfishFullvpnSid"], 0)
+
+    def test_no_restore_when_account_already_on_target_node(self):
+        self.client.conf["mudfishFullvpnSid"] = 11
+        c = self.make()
+        c.connect()
+        c.disconnect()
+        self.assertEqual(self.client.saved, [])
+        self.assertEqual(self.client.conf["mudfishFullvpnSid"], 11)
+
+    def test_restore_failure_stays_pending_and_retries(self):
+        c = self.make()
+        c.connect()
+        real_save = self.client.save_prog_conf
+
+        def failing(jwt, api, conf):
+            raise MudfishError("network down")
+
+        self.client.save_prog_conf = failing
+        st = c.disconnect()
+        self.assertEqual(st["phase"], "off")
+        self.assertTrue(st["restore_pending"])
+        self.assertEqual(Store(self.path).load()["fullvpn_restore"], {"sid": 0, "vid": 0})
+        self.client.save_prog_conf = real_save
+        c.retry_restore()
+        self.assertEqual(self.client.conf["mudfishFullvpnSid"], 0)
+        self.assertFalse(c.state()["restore_pending"])
+
+    def test_retry_restore_waits_while_tunnel_up(self):
+        c = self.make()
+        c.connect()
+        saves = len(self.client.saved)
+        c.retry_restore()
+        self.assertEqual(len(self.client.saved), saves)
+        self.assertEqual(self.client.conf["mudfishFullvpnSid"], 11)
+
+    def test_connect_timeout_restores_original(self):
+        self.client.ready_on_start = False
+        self.make().connect()
+        self.assertEqual(self.client.conf["mudfishFullvpnSid"], 0)
+
+    def test_resume_restores_original(self):
+        c = self.make()
+        c.connect()
+        c.check_resume(5.0)
+        c.check_resume(100.0)
+        self.assertEqual(self.client.conf["mudfishFullvpnSid"], 0)
+
+    def test_shutdown_restores_original(self):
+        c = self.make()
+        c.connect()
+        c.shutdown()
+        self.assertEqual(self.client.conf["mudfishFullvpnSid"], 0)
+
+    def test_uninstall_restores_before_removing_mudfish(self):
+        c = self.make_with_installer()
+        c.connect()
+        order = []
+        real_save = self.client.save_prog_conf
+        self.client.save_prog_conf = lambda j, a, conf: order.append("restore") or real_save(j, a, conf)
+        real_remove = self.installer.remove_all
+        self.installer.remove_all = lambda root: order.append("remove") or real_remove(root)
+        c.uninstall()
+        self.assertEqual(order, ["restore", "remove"])
+        self.assertEqual(self.client.conf["mudfishFullvpnSid"], 0)
 
     def test_disconnect_without_snapshot_deletes_nothing(self):
         self.client.st.update(core_running=True, client_ready=True)
